@@ -1,0 +1,28 @@
+{
+	"alerts": [
+		{
+			"name": "Function Errors",
+			"condition": "count() > 5",
+			"timeWindow": "PT5M",
+			"severity": "Error",
+			"description": "Alert when function errors exceed threshold"
+		},
+		{
+			"name": "High Response Time",
+			"condition": "avg(duration) > 30000",
+			"timeWindow": "PT15M",
+			"severity": "Warning",
+			"description": "Alert when average response time exceeds 30 seconds"
+		}
+	],
+	"dashboards": {
+		"functions": {
+			"widgets": [
+				"request_count",
+				"error_rate",
+				"response_time",
+				"memory_usage"
+			]
+		}
+	}
+}

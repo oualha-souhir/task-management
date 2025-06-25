@@ -1,0 +1,33 @@
+{
+	"name": "slack-wrike-task-manager",
+	"version": "1.0.0",
+	"description": "Slack application for managing tasks with Wrike integration",
+	"main": "src/index.js",
+	"scripts": {
+		"build": "echo 'No build step needed for JavaScript'",
+		"start": "func start --verbose",
+		"dev": "func start --verbose --javascript",
+		"clean": "rm -rf dist node_modules/.cache",
+		"deploy": "bash deploy.sh",
+		"deploy:windows": "powershell -ExecutionPolicy Bypass -File deploy.ps1",
+		"deploy:quick": "func azure functionapp publish slack-wrike-functions",
+		"test:mongodb": "node scripts/testMongoDB.js",
+		"test:wrike": "node scripts/debugWrike.js",
+		"fix:mongodb": "node scripts/fixMongoDB.js",
+		"logs": "func azure functionapp logstream slack-wrike-functions"
+	},
+	"dependencies": {
+		"@azure/functions": "^4.7.3-beta.0",
+		"axios": "^1.10.0",
+		"dotenv": "^16.5.0",
+		"mongodb": "^6.17.0",
+		"mongoose": "^6.13.8"
+	},
+	"devDependencies": {
+		"@types/node": "^20.19.1",
+		"azure-functions-core-tools": "^4.0.4915"
+	},
+	"engines": {
+		"node": "~20"
+	}
+}

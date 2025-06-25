@@ -1,0 +1,26 @@
+{
+	"deployment": {
+		"resourceGroup": "slack-wrike-rg",
+		"functionAppName": "slack-wrike-functions",
+		"location": "East US",
+		"runtime": "node",
+		"runtimeVersion": "18",
+		"plan": "consumption",
+		"storageAccountName": "slackwrikestorage"
+	},
+	"appSettings": {
+		"NODE_ENV": "production",
+		"WEBSITE_RUN_FROM_PACKAGE": "1",
+		"FUNCTIONS_WORKER_RUNTIME": "node",
+		"WEBSITE_NODE_DEFAULT_VERSION": "~18",
+		"SCM_DO_BUILD_DURING_DEPLOYMENT": "false",
+		"ENABLE_ORYX_BUILD": "false"
+	},
+	"secrets": [
+		"SLACK_BOT_TOKEN",
+		"SLACK_SIGNING_SECRET",
+		"SLACK_APP_TOKEN",
+		"WRIKE_ACCESS_TOKEN",
+		"MONGODB_URI"
+	]
+}
