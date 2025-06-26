@@ -3,79 +3,132 @@ const { verifySlackSignature } = require("../utils/slackVerification");
 const wrikeService = require("../services/wrikeService");
 const databaseService = require("../services/databaseService");
 const { openTaskModal } = require("./openTaskModal");
+const slackApiHelper = require("../utils/slackApiHelper");
 
 app.http("SlackSlashCommands", {
 	methods: ["POST"],
 	authLevel: "anonymous",
 	route: "slack/commands",
 	handler: async (request, context) => {
+		const startTime = Date.now();
+
 		try {
-			context.log("SlackSlashCommands function triggered");
-
+			// Parse form data immediately
 			const rawBody = await request.text();
-
-			const signingSecret = process.env.SLACK_SIGNING_SECRET;
-			const isDevelopment = process.env.NODE_ENV === "development";
-
-			if (signingSecret && signingSecret !== "demo-mode" && !isDevelopment) {
-				const signature = request.headers.get("x-slack-signature");
-				const timestamp = request.headers.get("x-slack-request-timestamp");
-
-				if (!signature || !timestamp) {
-					context.warn("Missing Slack signature headers");
-					return { status: 401, body: "Unauthorized - Missing signature" };
-				}
-
-				if (!verifySlackSignature(rawBody, signature, timestamp, signingSecret)) {
-					context.warn("Invalid Slack signature");
-					return { status: 401, body: "Unauthorized - Invalid signature" };
-				}
-			} else if (isDevelopment) {
-				context.log("Development mode - skipping signature verification");
-			}
-
 			const params = new URLSearchParams(rawBody);
 			const command = {
-				token: params.get("token"),
-				team_id: params.get("team_id"),
-				team_domain: params.get("team_domain"),
-				channel_id: params.get("channel_id"),
-				channel_name: params.get("channel_name"),
-				user_id: params.get("user_id"),
-				user_name: params.get("user_name"),
 				command: params.get("command"),
 				text: params.get("text"),
-				response_url: params.get("response_url"),
+				user_id: params.get("user_id"),
+				channel_id: params.get("channel_id"),
 				trigger_id: params.get("trigger_id"),
 			};
 
-			context.log("Received slash command:", command.command, "with text:", command.text);
+			context.log(`Command ${command.command} received`);
 
+			// Route to handler immediately based on command
 			switch (command.command) {
 				case "/task-test":
-					// return await handleTaskCommand(command, context);
+					return await slackApiHelper.postSlackMessageWithRetry(
+						"https://slack.com/api/chat.postEphemeral",
+						{
+							channel: command.channel_id,
+							user: command.user_id,
+							blocks: [
+								{
+									type: "header",
+									text: {
+										type: "plain_text",
+										text: "Création d'une nouvelle tâche",
+										emoji: true,
+									},
+								},
+								{
+									type: "section",
+									text: {
+										type: "mrkdwn",
+										text: `Bonjour <@${command.user_id}> ! Voici comment créer une  tâche :`,
+									},
+								},
+								{
+									type: "divider",
+								},
+								{
+									type: "section",
+									text: {
+										type: "mrkdwn",
+										text: "*Option 1:* Créez une tâche rapide avec la syntaxe suivante:",
+									},
+								},
+								{
+									type: "section",
+									text: {
+										type: "mrkdwn",
+										text: "```\n/task\n```",
+									},
+								},
+								{
+									type: "context",
+									elements: [
+										{
+											type: "mrkdwn",
+											text: "💡 *Exemple:* `/task`",
+										},
+									],
+								},
+
+								{
+									type: "divider",
+								},
+								{
+									type: "section",
+									text: {
+										type: "mrkdwn",
+										text: "*Option 2:* Utilisez le formulaire interactif ci-dessous",
+									},
+								},
+								{
+									type: "actions",
+									elements: [
+										{
+											type: "button",
+											text: {
+												type: "plain_text",
+												text: "📋 Ouvrir le formulaire",
+												emoji: true,
+											},
+											style: "primary",
+											action_id: "create_another_task",
+											value: "create_task",
+										},
+									],
+								},
+							],
+							text: `💰 Bonjour <@${command.user_id}> ! Pour créer une tâche, utilisez la commande directe ou le formulaire.`,
+						},
+						process.env.SLACK_BOT_TOKEN
+					);
+				case "/create-task":
 					return await openTaskModal(command, context);
-				case "/wrike":
-					return await handleWrikeCommand(command, context);
-				case "/help":
-					return await handleHelpCommand(command, context);
 
 				default:
 					return {
 						status: 200,
 						jsonBody: {
 							response_type: "ephemeral",
-							text: `Unknown command: ${command.command}`,
+							text: "❌ Unknown command",
 						},
 					};
 			}
 		} catch (error) {
-			context.error("SlackSlashCommands error:", error);
+			const duration = Date.now() - startTime;
+			context.error(`Error after ${duration}ms:`, error.message);
+
 			return {
-				status: 500,
+				status: 200,
 				jsonBody: {
 					response_type: "ephemeral",
-					text: "Sorry, something went wrong processing your command.",
+					text: "❌ An error occurred. Please try again.",
 				},
 			};
 		}
@@ -83,189 +136,30 @@ app.http("SlackSlashCommands", {
 });
 
 async function handleTaskCommand(command, context) {
-    console.log("Handling task command:", command);
-    const text = command.text?.trim();
+	console.log("Handling task command:", command);
+	const text = command.text?.trim();
 
-    if (!text || text.toLowerCase() === "create") {
-        return await openTaskModal(command, context);
-    }
-
-    const [action, ...args] = text.split(" ");
-
-    switch (action.toLowerCase()) {
-        case "create":
-            return await openTaskModal(command, context);
-        case "list":
-            return await listTasks(command, context);
-        case "update":
-            return await updateTask(args, command, context);
-        default:
-            return {
-                status: 200,
-                jsonBody: {
-                    response_type: "ephemeral",
-                    text: `Unknown task action: ${action}. Use \`create\`, \`list\`, or \`update\`.`,
-                },
-            };
-    }
-}
-
-async function createTask(title, command, context) {
-	console.log("Creating task with title:", title);
-	if (!title) {
-		return {
-			status: 200,
-			jsonBody: {
-				response_type: "ephemeral",
-				text: "Please provide a task title. Usage: `/task create [title]`",
-			},
-		};
+	if (!text || text.toLowerCase() === "create") {
+		return await openTaskModal(command, context);
 	}
 
-	try {
-		context.log("Creating task:", title);
+	const [action, ...args] = text.split(" ");
 
-		let wrikeTask = null;
-		let wrikeError = null;
-
-		// Try to create task in Wrike
-		// try {
-		// 	// wrikeTask = await wrikeService.createTask({
-		// 	// 	title: title,
-		// 	// 	description: `Created from Slack by ${command.user_name} in #${command.channel_name}`,
-		// 	// });
-		// 	context.log("Wrike task created successfully:", wrikeTask.id);
-		// } catch (error) {
-		// 	wrikeError = error.message;
-		// 	context.warn("Wrike task creation failed:", error.message);
-
-		// 	// Create a mock Wrike task for local storage
-		// 	wrikeTask = {
-		// 		id: `local_${Date.now()}`,
-		// 		title: title,
-		// 		status: "Active",
-		// 		permalink: null,
-		// 		created: new Date().toISOString(),
-		// 		mock: true,
-		// 	};
-		// }
-
-		// Save to database (MongoDB or in-memory fallback)
-		const task = await databaseService.saveTask({
-			id: `task_${Date.now()}`,
-			wrike_id: wrikeTask.id,
-			title: title,
-			status: "Active",
-			created_by: command.user_name,
-			user_id: command.user_id,
-			channel: command.channel_name,
-			channel_id: command.channel_id,
-			wrike_permalink: wrikeTask.permalink,
-			wrike_synced: !wrikeTask.mock,
-		});
-
-		// Create response blocks
-		const responseBlocks = [
-			{
-				type: "section",
-				text: {
-					type: "mrkdwn",
-					text: `*New Task Created* 🎯\n*${task.title}*`,
+	switch (action.toLowerCase()) {
+		case "create":
+			return await openTaskModal(command, context);
+		case "list":
+			return await listTasks(command, context);
+		case "update":
+			return await updateTask(args, command, context);
+		default:
+			return {
+				status: 200,
+				jsonBody: {
+					response_type: "ephemeral",
+					text: `Unknown task action: ${action}. Use \`create\`, \`list\`, or \`update\`.`,
 				},
-			},
-			{
-				type: "section",
-				fields: [
-					{
-						type: "mrkdwn",
-						text: `*Status:*\n${task.status}`,
-					},
-					{
-						type: "mrkdwn",
-						text: `*Created by:*\n<@${command.user_id}>`,
-					},
-					{
-						type: "mrkdwn",
-						text: `*Task ID:*\n${task.id}`,
-					},
-					{
-						type: "mrkdwn",
-						text: `*Channel:*\n#${task.channel}`,
-					},
-				],
-			},
-		];
-
-		// Add action buttons
-		const actionElements = [
-			{
-				type: "button",
-				text: {
-					type: "plain_text",
-					text: "Mark Complete",
-				},
-				action_id: "complete_task",
-				value: task.id,
-				style: "primary",
-			},
-		];
-
-		// Only add Wrike button if successfully synced
-		if (task.wrike_permalink && !wrikeTask.mock) {
-			actionElements.push({
-				type: "button",
-				text: {
-					type: "plain_text",
-					text: "View in Wrike",
-				},
-				action_id: "view_task",
-				value: task.id,
-				url: task.wrike_permalink,
-			});
-		}
-
-		responseBlocks.push({
-			type: "actions",
-			elements: actionElements,
-		});
-
-		// Add warnings for any issues
-		const warnings = [];
-		if (wrikeError) {
-			warnings.push(`⚠️ Wrike sync failed: Task saved locally only`);
-		}
-		if (task.storage === "memory") {
-			warnings.push(`⚠️ Database unavailable: Using temporary storage`);
-		}
-
-		if (warnings.length > 0) {
-			responseBlocks.push({
-				type: "context",
-				elements: [
-					{
-						type: "mrkdwn",
-						text: warnings.join("\n"),
-					},
-				],
-			});
-		}
-
-		return {
-			status: 200,
-			jsonBody: {
-				response_type: "in_channel",
-				blocks: responseBlocks,
-			},
-		};
-	} catch (error) {
-		context.error("Error creating task:", error);
-		return {
-			status: 200,
-			jsonBody: {
-				response_type: "ephemeral",
-				text: `❌ Error creating task: ${error.message}`,
-			},
-		};
+			};
 	}
 }
 
@@ -473,5 +367,3 @@ async function handleHelpCommand(command, context) {
 		},
 	};
 }
-
-module.exports = {createTask}

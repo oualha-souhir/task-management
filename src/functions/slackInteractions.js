@@ -1,7 +1,8 @@
 const { app } = require("@azure/functions");
-
 const querystring = require("querystring");
-const { createTask } = require("../services/wrikeService");
+const { handleTaskCreation } = require("../handlers/taskCreationHandler");
+const { createTaskModal } = require("../utils/modalBuilder");
+const slackApiHelper = require("../utils/slackApiHelper");
 
 app.http("SlackInteractions", {
 	methods: ["POST"],
@@ -9,7 +10,8 @@ app.http("SlackInteractions", {
 	route: "slack/interactions",
 	handler: async (request, context) => {
 		try {
-			console.log("Received Slack interaction request");
+			context.log("Received Slack interaction request");
+
 			// Parse the body as a URL-encoded string
 			const rawBody = await request.text();
 			const parsedBody = querystring.parse(rawBody);
@@ -22,53 +24,108 @@ app.http("SlackInteractions", {
 				payload.type === "view_submission" &&
 				payload.view.callback_id === "create_task_modal"
 			) {
-				context.log("Handling view submission for task creation modal");
+				console.log("Handling view submission for task creation");
+				context.res = {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ response_action: "clear" }),
+				};
 
-				// Extract task details from the modal submission
+				// Process in background
+				setImmediate(async () => {
+					await handleTaskCreation(payload, context);
+				});
+				return context.res;
+			}
 
-                const values = payload.view.state.values;
-                const taskDetails = {
-                    title: values.task_title?.title_input?.value || "Untitled Task",
-                    description: values.task_description?.description_input?.value || "",
-                    dueDate: values.task_due_date?.due_date_input?.selected_date || null,
-                    assignee: values.task_assignee?.assignee_input?.value || null,
-                };
+			// Handle button clicks for "Create Another Task"
+			if (payload.type === "block_actions") {
+				const action = payload.actions[0];
 
-                context.log("Creating task with details:", taskDetails);
-
-				try {
-					const result = await createTask(taskDetails);
-
-					context.log("Task creation result:", result);
-
-					// Get task details for response
-					const taskData = result.data[0];
-					const taskUrl = result.taskUrl || taskData.permalink;
-
-					// Send success response
-					return {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({
-							response_action: "clear",
-							text: `✅ Task "${taskData.title}" created successfully!\n📋 Task ID: ${taskData.id}\n🔗 View in Wrike: ${taskUrl}`,
-						}),
-					};
-				} catch (taskError) {
-					context.log("Task creation failed:", taskError.message);
-
-					return {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({
-							response_action: "errors",
-							errors: {
-								title_block: `Failed to create task: ${taskError.message}`,
+				if (action.action_id === "create_another_task") {
+					// Validate trigger_id immediately
+					if (!payload.trigger_id) {
+						context.error("No trigger_id in payload for create_another_task");
+						return {
+							status: 200,
+							jsonBody: {
+								response_type: "ephemeral",
+								text: "❌ Unable to open modal. Please use the `/create-task` command instead.",
 							},
-						}),
-					};
+						};
+					}
+
+					try {
+						await slackApiHelper.openModal(
+							payload.trigger_id,
+							createTaskModal()
+						);
+						return { status: 200 };
+					} catch (error) {
+						context.error("Error opening modal:", error.message);
+
+						if (error.message === "EXPIRED_TRIGGER_ID") {
+							return {
+								status: 200,
+								jsonBody: {
+									response_type: "ephemeral",
+									text: "⏱️ The button action expired. Please use the `/create-task` command to create a new task.",
+								},
+							};
+						}
+
+						return {
+							status: 200,
+							jsonBody: {
+								response_type: "ephemeral",
+								text: `❌ Failed to open modal: ${error.message}. Please try using the \`/create-task\` command instead.`,
+							},
+						};
+					}
+				}
+
+				// Handle task status updates
+				if (action.action_id === "update_task_status") {
+					const taskId = action.value;
+					const selectedStatus = action.selected_option.value;
+
+					try {
+						// Update task status in Wrike
+						const { updateTaskStatus } = require("../services/wrikeService");
+						await updateTaskStatus(taskId, selectedStatus);
+
+						// Update the message to reflect the status change
+						return {
+							status: 200,
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({
+								response_type: "in_channel",
+								text: `✅ Task status updated to: ${selectedStatus}`,
+								replace_original: false,
+							}),
+						};
+					} catch (error) {
+						context.error("Error updating task status:", error);
+						return {
+							status: 200,
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({
+								response_type: "ephemeral",
+								text: `❌ Failed to update task status: ${error.message}`,
+							}),
+						};
+					}
 				}
 			}
+
+			// Default response for unhandled interactions
+			return {
+				status: 200,
+				jsonBody: {
+					response_type: "ephemeral",
+					text: "Interaction received but not handled.",
+				},
+			};
 		} catch (error) {
 			context.error("Error handling Slack interaction:", error);
 			return {
@@ -81,4 +138,3 @@ app.http("SlackInteractions", {
 		}
 	},
 });
-

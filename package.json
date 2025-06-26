@@ -21,7 +21,8 @@
 		"axios": "^1.10.0",
 		"dotenv": "^16.5.0",
 		"mongodb": "^6.17.0",
-		"mongoose": "^6.13.8"
+		"mongoose": "^6.13.8",
+		"agentkeepalive": "^4.5.0"
 	},
 	"devDependencies": {
 		"@types/node": "^20.19.1",
