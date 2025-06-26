@@ -2,6 +2,7 @@ const { app } = require("@azure/functions");
 const { verifySlackSignature } = require("../utils/slackVerification");
 const wrikeService = require("../services/wrikeService");
 const databaseService = require("../services/databaseService");
+const { openTaskModal } = require("./openTaskModal");
 
 app.http("SlackSlashCommands", {
 	methods: ["POST"],
@@ -13,7 +14,6 @@ app.http("SlackSlashCommands", {
 
 			const rawBody = await request.text();
 
-			// Verify Slack signature if not in demo/development mode
 			const signingSecret = process.env.SLACK_SIGNING_SECRET;
 			const isDevelopment = process.env.NODE_ENV === "development";
 
@@ -26,9 +26,7 @@ app.http("SlackSlashCommands", {
 					return { status: 401, body: "Unauthorized - Missing signature" };
 				}
 
-				if (
-					!verifySlackSignature(rawBody, signature, timestamp, signingSecret)
-				) {
+				if (!verifySlackSignature(rawBody, signature, timestamp, signingSecret)) {
 					context.warn("Invalid Slack signature");
 					return { status: 401, body: "Unauthorized - Invalid signature" };
 				}
@@ -36,7 +34,6 @@ app.http("SlackSlashCommands", {
 				context.log("Development mode - skipping signature verification");
 			}
 
-			// Parse form data from Slack
 			const params = new URLSearchParams(rawBody);
 			const command = {
 				token: params.get("token"),
@@ -52,21 +49,17 @@ app.http("SlackSlashCommands", {
 				trigger_id: params.get("trigger_id"),
 			};
 
-			context.log(
-				"Received slash command:",
-				command.command,
-				"with text:",
-				command.text
-			);
+			context.log("Received slash command:", command.command, "with text:", command.text);
 
-			// Route to appropriate command handler
 			switch (command.command) {
-				case "/task":
-					return await handleTaskCommand(command, context);
+				case "/task-test":
+					// return await handleTaskCommand(command, context);
+					return await openTaskModal(command, context);
 				case "/wrike":
 					return await handleWrikeCommand(command, context);
 				case "/help":
 					return await handleHelpCommand(command, context);
+
 				default:
 					return {
 						status: 200,
@@ -90,48 +83,35 @@ app.http("SlackSlashCommands", {
 });
 
 async function handleTaskCommand(command, context) {
-	const text = command.text?.trim();
+    console.log("Handling task command:", command);
+    const text = command.text?.trim();
 
-	if (!text) {
-		return {
-			status: 200,
-			jsonBody: {
-				response_type: "ephemeral",
-				text: "Usage: `/task [create|list|update] [task details]`",
-				blocks: [
-					{
-						type: "section",
-						text: {
-							type: "mrkdwn",
-							text: "*Task Command Help* 📋\n\n• `/task create [title]` - Create a new task\n• `/task list` - List your tasks\n• `/task update [id] [status]` - Update task status",
-						},
-					},
-				],
-			},
-		};
-	}
+    if (!text || text.toLowerCase() === "create") {
+        return await openTaskModal(command, context);
+    }
 
-	const [action, ...args] = text.split(" ");
+    const [action, ...args] = text.split(" ");
 
-	switch (action.toLowerCase()) {
-		case "create":
-			return await createTask(args.join(" "), command, context);
-		case "list":
-			return await listTasks(command, context);
-		case "update":
-			return await updateTask(args, command, context);
-		default:
-			return {
-				status: 200,
-				jsonBody: {
-					response_type: "ephemeral",
-					text: `Unknown task action: ${action}. Use \`create\`, \`list\`, or \`update\`.`,
-				},
-			};
-	}
+    switch (action.toLowerCase()) {
+        case "create":
+            return await openTaskModal(command, context);
+        case "list":
+            return await listTasks(command, context);
+        case "update":
+            return await updateTask(args, command, context);
+        default:
+            return {
+                status: 200,
+                jsonBody: {
+                    response_type: "ephemeral",
+                    text: `Unknown task action: ${action}. Use \`create\`, \`list\`, or \`update\`.`,
+                },
+            };
+    }
 }
 
 async function createTask(title, command, context) {
+	console.log("Creating task with title:", title);
 	if (!title) {
 		return {
 			status: 200,
@@ -149,26 +129,26 @@ async function createTask(title, command, context) {
 		let wrikeError = null;
 
 		// Try to create task in Wrike
-		try {
-			wrikeTask = await wrikeService.createTask({
-				title: title,
-				description: `Created from Slack by ${command.user_name} in #${command.channel_name}`,
-			});
-			context.log("Wrike task created successfully:", wrikeTask.id);
-		} catch (error) {
-			wrikeError = error.message;
-			context.warn("Wrike task creation failed:", error.message);
+		// try {
+		// 	// wrikeTask = await wrikeService.createTask({
+		// 	// 	title: title,
+		// 	// 	description: `Created from Slack by ${command.user_name} in #${command.channel_name}`,
+		// 	// });
+		// 	context.log("Wrike task created successfully:", wrikeTask.id);
+		// } catch (error) {
+		// 	wrikeError = error.message;
+		// 	context.warn("Wrike task creation failed:", error.message);
 
-			// Create a mock Wrike task for local storage
-			wrikeTask = {
-				id: `local_${Date.now()}`,
-				title: title,
-				status: "Active",
-				permalink: null,
-				created: new Date().toISOString(),
-				mock: true,
-			};
-		}
+		// 	// Create a mock Wrike task for local storage
+		// 	wrikeTask = {
+		// 		id: `local_${Date.now()}`,
+		// 		title: title,
+		// 		status: "Active",
+		// 		permalink: null,
+		// 		created: new Date().toISOString(),
+		// 		mock: true,
+		// 	};
+		// }
 
 		// Save to database (MongoDB or in-memory fallback)
 		const task = await databaseService.saveTask({
@@ -373,6 +353,7 @@ async function listTasks(command, context) {
 }
 
 async function updateTask(args, command, context) {
+	console.log("Updating task with args:", args);
 	if (args.length < 2) {
 		return {
 			status: 200,
@@ -421,6 +402,7 @@ async function updateTask(args, command, context) {
 }
 
 async function handleWrikeCommand(command, context) {
+	console.log("Handling Wrike command:", command);
 	return {
 		status: 200,
 		jsonBody: {
@@ -453,6 +435,7 @@ async function handleWrikeCommand(command, context) {
 }
 
 async function handleHelpCommand(command, context) {
+	console.log("Handling help command:", command);
 	return {
 		status: 200,
 		jsonBody: {
@@ -490,3 +473,5 @@ async function handleHelpCommand(command, context) {
 		},
 	};
 }
+
+module.exports = {createTask}

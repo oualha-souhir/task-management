@@ -12,6 +12,7 @@ class EnvironmentConfig {
 	 * Get configuration based on environment
 	 */
 	getConfig() {
+		console.log("Loading environment configuration...");
 		const baseConfig = {
 			mongodb: {
 				uri: process.env.MONGODB_URI,
@@ -47,6 +48,7 @@ class EnvironmentConfig {
 	 * Validate required environment variables
 	 */
 	validate() {
+		console.log("Validating environment variables...");
 		const required = [
 			"SLACK_BOT_TOKEN",
 			"SLACK_SIGNING_SECRET",
@@ -72,6 +74,7 @@ class EnvironmentConfig {
 	 * Get current environment info
 	 */
 	getInfo() {
+		console.log("Fetching environment info...");
 		return {
 			environment: process.env.NODE_ENV || "development",
 			isProduction: this.isProduction,

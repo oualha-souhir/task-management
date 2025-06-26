@@ -2,6 +2,7 @@ const axios = require("axios");
 require("dotenv").config();
 
 async function testWrikeToken() {
+	console.log("🔗 Testing Wrike API access...");
 	const token = process.env.WRIKE_ACCESS_TOKEN;
 	console.log("🔑 Using Wrike access token:", token);
 	if (!token) {

@@ -1,93 +1,84 @@
 const { app } = require("@azure/functions");
 
+const querystring = require("querystring");
+const { createTask } = require("../services/wrikeService");
+
 app.http("SlackInteractions", {
 	methods: ["POST"],
 	authLevel: "anonymous",
 	route: "slack/interactions",
 	handler: async (request, context) => {
 		try {
-			context.log("SlackInteractions function triggered");
+			console.log("Received Slack interaction request");
+			// Parse the body as a URL-encoded string
+			const rawBody = await request.text();
+			const parsedBody = querystring.parse(rawBody);
 
-			// Check if running in demo mode
-			const isDemoMode =
-				!process.env.SLACK_BOT_TOKEN ||
-				
-				process.env.SLACK_BOT_TOKEN === "demo-mode";
+			// Slack sends the payload as a JSON string in the "payload" field
+			const payload = JSON.parse(parsedBody.payload);
+			context.log("Slack interaction payload:", payload);
 
-			if (isDemoMode) {
-				context.info("Running in demo mode - Slack not configured");
-				return {
-					status: 200,
-					jsonBody: {
-						response_type: "ephemeral",
-						text: "🔧 Demo Mode - Slack Interactions endpoint active",
-						blocks: [
-							{
-								type: "section",
-								text: {
-									type: "mrkdwn",
-									text: "*Demo Mode* 🚧\nSlack interactions endpoint is active but not configured",
-								},
-							},
-						],
-					},
-				};
-			}
+			if (
+				payload.type === "view_submission" &&
+				payload.view.callback_id === "create_task_modal"
+			) {
+				context.log("Handling view submission for task creation modal");
 
-			// Handle form data from Slack
-			const body = await request.text();
-			const params = new URLSearchParams(body);
-			const payload = JSON.parse(params.get("payload") || "{}");
+				// Extract task details from the modal submission
 
-			context.log("Processing interaction:", payload.type);
+                const values = payload.view.state.values;
+                const taskDetails = {
+                    title: values.task_title?.title_input?.value || "Untitled Task",
+                    description: values.task_description?.description_input?.value || "",
+                    dueDate: values.task_due_date?.due_date_input?.selected_date || null,
+                    assignee: values.task_assignee?.assignee_input?.value || null,
+                };
 
-			// Handle different interaction types
-			switch (payload.type) {
-				case "block_actions":
-					return await handleBlockActions(payload, context);
-				case "view_submission":
-					return await handleViewSubmission(payload, context);
-				default:
-					context.warn("Unknown interaction type:", payload.type);
+                context.log("Creating task with details:", taskDetails);
+
+				try {
+					const result = await createTask(taskDetails);
+
+					context.log("Task creation result:", result);
+
+					// Get task details for response
+					const taskData = result.data[0];
+					const taskUrl = result.taskUrl || taskData.permalink;
+
+					// Send success response
 					return {
 						status: 200,
-						jsonBody: { message: "Interaction received" },
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							response_action: "clear",
+							text: `✅ Task "${taskData.title}" created successfully!\n📋 Task ID: ${taskData.id}\n🔗 View in Wrike: ${taskUrl}`,
+						}),
 					};
+				} catch (taskError) {
+					context.log("Task creation failed:", taskError.message);
+
+					return {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							response_action: "errors",
+							errors: {
+								title_block: `Failed to create task: ${taskError.message}`,
+							},
+						}),
+					};
+				}
 			}
 		} catch (error) {
-			context.error("SlackInteractions error:", error);
+			context.error("Error handling Slack interaction:", error);
 			return {
 				status: 500,
 				jsonBody: {
-					error: "Internal server error",
 					response_type: "ephemeral",
-					text: "Sorry, something went wrong processing your request.",
+					text: `❌ Error handling interaction: ${error.message}`,
 				},
 			};
 		}
 	},
 });
 
-async function handleBlockActions(payload, context) {
-	const action = payload.actions[0];
-	context.log("Handling block action:", action.action_id);
-
-	return {
-		status: 200,
-		jsonBody: {
-			response_type: "ephemeral",
-			text: `Action processed: ${action.action_id}`,
-		},
-	};
-}
-
-async function handleViewSubmission(payload, context) {
-	context.log("Handling view submission:", payload.view.callback_id);
-
-	return {
-		status: 200,
-		jsonBody: {
-			response_action: "clear",
-		},
-	};
-}

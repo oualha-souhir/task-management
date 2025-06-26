@@ -36,10 +36,4 @@ func start
 ## Deployment
 
 See `azure-deploy.md` for deployment instructions.
-# task-management
-# task-management
-# task-management
-# task-management
-# task-management
-# task-management
-# task-management
+

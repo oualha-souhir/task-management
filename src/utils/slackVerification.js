@@ -8,6 +8,7 @@ const crypto = require("crypto");
  * @param {string} signingSecret - Slack signing secret
  */
 function verifySlackSignature(rawBody, signature, timestamp, signingSecret) {
+	console.log("Verifying Slack signature...");
 	try {
 		// Check if request is too old (5 minutes)
 		const currentTime = Math.floor(Date.now() / 1000);
@@ -40,6 +41,7 @@ function verifySlackSignature(rawBody, signature, timestamp, signingSecret) {
  * Middleware to verify Slack requests
  */
 function createSlackVerificationMiddleware(signingSecret) {
+	console.log("Creating Slack verification middleware...");
 	return (rawBody, headers) => {
 		if (process.env.NODE_ENV === "development" && !signingSecret) {
 			// Skip verification in development if no signing secret
