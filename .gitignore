@@ -113,7 +113,7 @@ config/secrets.js
 azure-functions-core-tools/
 node_modules/azure-functions-core-tools/
 .azurite/
-
+.azure-deploy.md
 # Extensions
 extensions.csproj
 .vscode/
