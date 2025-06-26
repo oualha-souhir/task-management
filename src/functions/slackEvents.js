@@ -1,157 +1,54 @@
 const { app } = require("@azure/functions");
+const { verifySlackSignature } = require("../utils/verification");
 
-// Register the function at module level (startup)
 app.http("SlackEvents", {
-	methods: ["GET", "POST"],
-	authLevel: "anonymous",
-	route: "slack/events",
-	handler: async (request, context) => {
-		try {
-			context.log("SlackEvents function triggered");
-			context.log("Request method:", request.method);
-			context.log("Request headers:", request.headers);
+  methods: ["GET", "POST"],
+  authLevel: "anonymous",
+  route: "slack/events",
+  handler: async (request, context) => {
+    context.log("SlackEvents triggered");
 
-			// Handle GET requests (simple health check)
-			if (request.method === "GET") {
-				return {
-					status: 200,
-					jsonBody: {
-						message: "Slack Events endpoint is active",
-						timestamp: new Date().toISOString(),
-						endpoint: "slack/events",
-					},
-				};
-			}
+    if (request.method === "GET") {
+      return {
+        status: 200,
+        jsonBody: { message: "Slack Events endpoint active" },
+      };
+    }
 
-			// Check if running in demo mode
-			const isDemoMode =
-				!process.env.SLACK_BOT_TOKEN ||
-				
-				process.env.SLACK_BOT_TOKEN === "demo-mode";
+    const rawBody = await request.text();
+    const signature = request.headers.get("x-slack-signature");
+    const timestamp = request.headers.get("x-slack-request-timestamp");
 
-			// Get request body
-			const body = await request.text();
-			context.log("Request body:", body);
+    if (!signature || !timestamp) {
+      context.error("Missing Slack signature or timestamp");
+      return { status: 401, jsonBody: { error: "Missing signature or timestamp" } };
+    }
 
-			let payload;
+    if (!process.env.SLACK_SIGNING_SECRET) {
+      context.error("SLACK_SIGNING_SECRET not configured");
+      return { status: 500, jsonBody: { error: "Server configuration error" } };
+    }
 
-			try {
-				payload = JSON.parse(body);
-				context.log("Parsed payload:", JSON.stringify(payload, null, 2));
-			} catch (e) {
-				context.warn("Invalid JSON payload received:", body);
-				return {
-					status: 400,
-					headers: { "Content-Type": "application/json" },
-					jsonBody: { error: "Invalid JSON" },
-				};
-			}
+    if (!verifySlackSignature(rawBody, signature, timestamp, process.env.SLACK_SIGNING_SECRET)) {
+      context.error("Invalid Slack signature");
+      return { status: 401, jsonBody: { error: "Invalid signature" } };
+    }
 
-			// Handle Slack URL verification challenge - this is CRITICAL
-			if (payload.challenge) {
-				context.log("CHALLENGE RECEIVED:", payload.challenge);
-				context.log("Challenge type:", payload.type);
+    let payload;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      context.error("Invalid JSON payload");
+      return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    }
 
-				return {
-					status: 200,
-					headers: {
-						"Content-Type": "text/plain",
-					},
-					body: payload.challenge,
-				};
-			}
+    if (payload.type === "url_verification") {
+      return { status: 200, body: payload.challenge, headers: { "Content-Type": "text/plain" } };
+    }
 
-			// Handle URL verification type (alternative format)
-			if (payload.type === "url_verification") {
-				context.log("URL verification request received");
-				context.log("Challenge value:", payload.challenge);
-
-				return {
-					status: 200,
-					headers: {
-						"Content-Type": "text/plain",
-					},
-					body: payload.challenge,
-				};
-			}
-
-			if (isDemoMode) {
-				context.info("Running in demo mode - Slack not configured");
-				return {
-					status: 200,
-					jsonBody: {
-						message: "SlackEvents endpoint active (Demo mode)",
-						timestamp: new Date().toISOString(),
-						configured: false,
-					},
-				};
-			}
-
-			// Handle actual Slack events
-			if (payload.event) {
-				context.info("Processing Slack event:", payload.event.type);
-
-				// Process different event types
-				switch (payload.event.type) {
-					case "message":
-						return await handleMessage(payload.event, context);
-					case "app_mention":
-						return await handleAppMention(payload.event, context);
-					default:
-						context.log("Unhandled event type:", payload.event.type);
-				}
-			}
-
-			// Default success response
-			return {
-				status: 200,
-				jsonBody: {
-					message: "Event processed successfully",
-					eventType: payload.event?.type || "unknown",
-					timestamp: new Date().toISOString(),
-				},
-			};
-		} catch (error) {
-			context.error("SlackEvents error:", error);
-			return {
-				status: 500,
-				jsonBody: {
-					error: "Internal server error",
-					message:
-						process.env.NODE_ENV === "development"
-							? error.message
-							: "Something went wrong",
-					timestamp: new Date().toISOString(),
-				},
-			};
-		}
-	},
+    return {
+      status: 200,
+      jsonBody: { message: "Event processed", eventType: payload.event?.type || "unknown" },
+    };
+  },
 });
-
-async function handleMessage(event, context) {
-	context.log("Handling message event:", event);
-
-	// Don't respond to bot messages or messages without text
-	if (event.bot_id || !event.text) {
-		return {
-			status: 200,
-			jsonBody: { message: "Message processed" },
-		};
-	}
-
-	// Process the message here
-	return {
-		status: 200,
-		jsonBody: { message: "Message processed successfully" },
-	};
-}
-
-async function handleAppMention(event, context) {
-	context.log("Handling app mention:", event);
-
-	// Handle when your bot is mentioned
-	return {
-		status: 200,
-		jsonBody: { message: "App mention processed" },
-	};
-}

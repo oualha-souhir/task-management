@@ -1,18 +1,15 @@
 const { app } = require("@azure/functions");
-console.log("App setup complete");
 
-// Configure app-level settings
-app.setup({
-	capabilities: {
-		isHttpTriggerAsyncSupported: true,
-	},
-});
-console.log("App setup complete");
+console.log("Initializing Azure Functions app...");
 
-// Import and register all functions
-require("./functions/slackEvents");
-require("./functions/slackInteractions");
-require("./functions/slackSlashCommands");
+app.setup({ capabilities: { isHttpTriggerAsyncSupported: true } });
 
-// Import health check (outside src directory)
-require("../health-check");
+try {
+  require("./functions/slackEvents");
+  require("./functions/slackInteractions");
+  require("./functions/slackSlashCommands");
+  console.log("Functions loaded successfully");
+} catch (error) {
+  console.error("Error loading functions:", error);
+  throw error;
+}
