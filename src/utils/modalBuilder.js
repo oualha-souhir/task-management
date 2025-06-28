@@ -33,8 +33,13 @@ function createTaskModal(channelId = "") {
       {
         type: "input",
         block_id: "task_assignee",
-        element: { type: "plain_text_input", action_id: "assignee_input" },
+        element: { 
+          type: "users_select", 
+          action_id: "assignee_input",
+          placeholder: { type: "plain_text", text: "Sélectionner un utilisateur" }
+        },
         label: { type: "plain_text", text: "Personne assignée" },
+        optional: true,
       },
     ],
   };

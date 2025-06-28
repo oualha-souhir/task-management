@@ -43,7 +43,7 @@ async function testMongoConnection() {
 
 		// Test synchronous save operation
 		console.log("💾 Testing synchronous save operation...");
-		const savedTask = await databaseService.saveTask(testTaskData);
+		const savedTask = await databaseService.saveTaskAsync(testTaskData);
 		console.log("✅ Task saved successfully:", savedTask._id || "ID generated");
 
 		// Test asynchronous save operation (fire-and-forget)

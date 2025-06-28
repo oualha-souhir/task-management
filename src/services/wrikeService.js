@@ -50,38 +50,57 @@ class WrikeService {
 	}
 	// ...existing code...
 	async createTask(taskDetails, channelId) {
-		await this.testConnection();
-		// Map channel ID to Wrike folder ID, fallback to default
-		const folderId =
-			CHANNEL_TO_WRIKE_PROJECT[channelId] || WRIKE_CONFIG.DEFAULT_FOLDER_ID;
-		console.log(`Creating task in folder: ${folderId}`);
-		console.log(`channelId: ${channelId}`);
+		try {
+			await this.testConnection();
+			
+			// Map channel ID to Wrike folder ID, fallback to default
+			const folderId = CHANNEL_TO_WRIKE_PROJECT[channelId] || WRIKE_CONFIG.DEFAULT_FOLDER_ID;
+			
+			console.log(`Creating task in folder: ${folderId}`);
+			console.log(`channelId: ${channelId}`);
 
-		const payload = this.buildTaskPayload(taskDetails);
+			const payload = this.buildTaskPayload(taskDetails);
 
-		const response = await this.client.post(
-			`/folders/${folderId}/tasks`,
-			payload
-		);
-		const task = response.data.data[0];
-		const taskId = new URL(task.permalink).searchParams.get("id");
+			const response = await this.client.post(`/folders/${folderId}/tasks`, payload);
+			const task = response.data.data[0];
+			const taskId = new URL(task.permalink).searchParams.get("id");
 
-		if (taskDetails.startDate && taskDetails.dueDate) {
-			await this.setTaskDate(
-				task.id,
-				taskDetails.startDate,
-				taskDetails.dueDate
-			);
+			if (taskDetails.startDate && taskDetails.dueDate) {
+				await this.setTaskDate(task.id, taskDetails.startDate, taskDetails.dueDate);
+			}
+
+			// Enhanced database save with channelId and status
+			const taskDataForDb = {
+				...taskDetails,
+				wrikeTaskId: taskId,
+				wrikePermalink: task.permalink,
+				wrikeFolderId: folderId,
+				channelId: channelId, // Explicitly include channelId
+				status: 'New', // Initial status
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString()
+			};
+
+			console.log("Saving task to database with enhanced data:", {
+				taskId,
+				channelId,
+				status: 'New',
+				folderId
+			});
+
+			// Use async database save for better performance
+			await this.databaseService.saveTaskAsync(taskDataForDb);
+
+			return { taskId, taskUrl: task.permalink };
+			
+		} catch (error) {
+			console.error("Task creation failed:", {
+				error: error.message,
+				channelId,
+				stack: error.stack
+			});
+			throw error;
 		}
-
-		this.databaseService.saveTaskAsync({
-			...taskDetails,
-			wrikeTaskId: taskId,
-			wrikePermalink: task.permalink,
-			wrikeFolderId: folderId,
-		});
-
-		return { taskId, taskUrl: task.permalink };
 	}
 
 	// Add this new method to resolve display ID to API task ID
@@ -152,6 +171,24 @@ class WrikeService {
             throw new Error(`Invalid status provided: ${status}`);
         }
 
+        // Get current task data from database first
+        let currentTaskData = null;
+        try {
+            currentTaskData = await this.databaseService.getTask(taskId);
+            console.log("Retrieved current task data:", {
+                taskId,
+                hasData: !!currentTaskData,
+                currentStatus: currentTaskData?.status,
+                channelId: currentTaskData?.channelId
+            });
+        } catch (dbError) {
+            console.warn("Failed to get current task data from database:", {
+                taskId,
+                error: dbError.message
+            });
+            // Continue without current data - we'll update what we can
+        }
+
         // Resolve display ID to actual API task ID
         const actualTaskId = await this.resolveTaskId(taskId);
 
@@ -173,6 +210,7 @@ class WrikeService {
             originalStatus: status,
             customStatusId,
             hasCustomStatus: !!customStatusId,
+            currentChannelId: currentTaskData?.channelId,
             endpoint: `/tasks/${actualTaskId}`,
         });
 
@@ -203,7 +241,48 @@ class WrikeService {
             payload,
         });
 
+        // Update task in Wrike
         const response = await this.client.put(`/tasks/${actualTaskId}`, payload);
+
+        console.log("Wrike update successful:", {
+            displayTaskId: taskId,
+            actualTaskId,
+            strategy: updateStrategy,
+            status: response.status
+        });
+
+        // Update status in database
+        try {
+            const updateData = {
+                status: status,
+                updatedAt: new Date().toISOString(),
+                previousStatus: currentTaskData?.status || 'Unknown'
+            };
+
+            // Include channelId if available from current data
+            if (currentTaskData?.channelId) {
+                updateData.channelId = currentTaskData.channelId;
+            }
+
+            await this.databaseService.updateTaskStatus(taskId, updateData);
+            
+            console.log("Database status updated successfully:", {
+                taskId,
+                newStatus: status,
+                channelId: currentTaskData?.channelId,
+                previousStatus: currentTaskData?.status
+            });
+
+        } catch (dbError) {
+            console.error("Failed to update status in database:", {
+                taskId,
+                status,
+                error: dbError.message,
+                channelId: currentTaskData?.channelId
+            });
+            // Don't throw here - Wrike update succeeded, database update failed
+            // This follows Azure Functions best practices for partial failures
+        }
 
         console.log("Wrike update response:", {
             displayTaskId: taskId,
@@ -214,6 +293,7 @@ class WrikeService {
         });
 
         return response.data;
+        
     } catch (error) {
         // Enhanced error logging following Azure Functions best practices
         console.error("Wrike API update failed:", {
@@ -222,6 +302,7 @@ class WrikeService {
             error: error.response?.data || error.message,
             statusCode: error.response?.status,
             url: error.config?.url,
+            correlationId: process.env.INVOCATION_ID // Azure Functions correlation ID
         });
         throw error;
     }

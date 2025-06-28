@@ -11,8 +11,8 @@ const WRIKE_CONFIG = {
 
 // Mapping of Slack channel IDs to Wrike folder IDs
 const CHANNEL_TO_WRIKE_PROJECT = {
-  "C0936RVC91T": "IEABCJBLI5SLSYUB", // Example: Task channel to default project
-  "C08KJ8R2JET": "IEABCJBLI5SLSYSU", // Example: Another channel to another Wrike project
+  "C08FBSXM29H": "IEABCJBLI5SLSYUB", // tech
+  "C08KJ8R2JET": "IEABCJBLI5SLSYSU", // tech1
 //   "C08KJ8R2JET": "IEABCJBLI5SD6PQZ", // Example: Another channel to another Wrike project
 
 };
